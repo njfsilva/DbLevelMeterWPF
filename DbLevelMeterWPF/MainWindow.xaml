@@ -1,0 +1,186 @@
+﻿<Window x:Class="DbLevelMeterWPF.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:DbLevelMeterWPF"
+        mc:Ignorable="d"
+        Title="DBFS Level Meter" Height="860" Width="800"
+        Background="#F0F0F0">
+    <Window.Resources>
+        <local:BoolInverterConverter x:Key="BoolInverter"/>
+        <local:DbToHeightConverter x:Key="DbToHeight"/>
+        <local:DbToYPositionConverter x:Key="DbToYPosition"/>
+        <local:GreenLevelHeightConverter x:Key="GreenHeight"/>
+        <local:YellowLevelHeightConverter x:Key="YellowHeight"/>
+        <local:RedLevelHeightConverter x:Key="RedHeight"/>
+
+        <Style x:Key="MetricLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="#333"/>
+        </Style>
+        <Style x:Key="ValueLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="36"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="FontFamily" Value="Courier New"/>
+            <Setter Property="Foreground" Value="#000"/>
+            <Setter Property="TextAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="ButtonStyle" TargetType="Button">
+            <Setter Property="Padding" Value="15,10"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Background" Value="#007ACC"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#005A9E"/>
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Background" Value="#CCCCCC"/>
+                    <Setter Property="Cursor" Value="Arrow"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Title -->
+        <TextBlock Grid.Row="0" FontSize="24" FontWeight="Bold" Text="DBFS Level Meter" 
+                   Foreground="#333" Margin="0,0,0,20"/>
+
+        <!-- Device Selection -->
+        <StackPanel Grid.Row="1" Margin="0,0,0,20">
+            <TextBlock Style="{StaticResource MetricLabelStyle}" Text="Audio Device" Margin="0,0,0,10"/>
+            <ComboBox ItemsSource="{Binding AvailableDevices}" 
+                      SelectedIndex="{Binding SelectedDeviceIndex}"
+                      Height="35" Padding="10" FontSize="12"
+                      Background="White" BorderBrush="#CCC" BorderThickness="1"/>
+        </StackPanel>
+
+        <!-- Level Display Area -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Current Level -->
+            <StackPanel Grid.Column="0" Margin="0,20,40,20">
+                <TextBlock Style="{StaticResource MetricLabelStyle}" Text="Current Level" Margin="0,0,0,15"/>
+
+                <!-- Level Bar Background -->
+                <Border Background="#E0E0E0" BorderBrush="#999" BorderThickness="1" Height="250"
+                        CornerRadius="4" Margin="0,0,0,15">
+                    <Grid>
+                        <!-- Canvas for Meter Scale and Reference Lines -->
+                        <Canvas>
+                            <!-- Meter Scale -->
+                            <Canvas Canvas.Left="0" Canvas.Top="0" Width="60" Height="250">
+                                <TextBlock Canvas.Left="10" Canvas.Top="5" FontSize="9" Text="0 dB" Foreground="#666"/>
+                                <TextBlock Canvas.Left="10" Canvas.Top="15" FontSize="8" Text="-3 dB" Foreground="#CCC"/>
+                                <TextBlock Canvas.Left="10" Canvas.Top="26" FontSize="8" Text="-6 dB" Foreground="#CCC"/>
+                                <TextBlock Canvas.Left="10" Canvas.Top="36" FontSize="9" Text="-9 dB" Foreground="#999"/>
+                                <TextBlock Canvas.Left="10" Canvas.Top="68" FontSize="9" Text="-18 dB" Foreground="#666"/>
+                                <TextBlock Canvas.Left="10" Canvas.Top="99" FontSize="9" Text="-27 dB" Foreground="#999"/>
+                                <TextBlock Canvas.Left="10" Canvas.Top="130" FontSize="9" Text="-36 dB" Foreground="#666"/>
+                                <TextBlock Canvas.Left="10" Canvas.Top="161" FontSize="9" Text="-45 dB" Foreground="#999"/>
+                                <TextBlock Canvas.Left="10" Canvas.Top="188" FontSize="9" Text="-54 dB" Foreground="#666"/>
+                                <TextBlock Canvas.Left="10" Canvas.Top="219" FontSize="9" Text="-63 dB" Foreground="#999"/>
+                                <TextBlock Canvas.Left="10" Canvas.Top="238" FontSize="9" Text="-72 dB" Foreground="#666"/>
+                                <TextBlock Canvas.Left="10" Canvas.Top="250" FontSize="9" Text="-∞" Foreground="#999"/>
+                            </Canvas>
+
+                            <!-- RMS Reference Line -->
+                            <Border Canvas.Left="40" Canvas.Top="{Binding AverageRmsDb, Converter={StaticResource DbToYPosition}}"
+                                    Width="{Binding ElementName=ColorBarsStackPanel, Path=ActualWidth}" 
+                                    Height="2" Background="#FF9800" Opacity="0.5"/>
+
+                            <!-- Peak Reference Line -->
+                            <Border Canvas.Left="40" Canvas.Top="{Binding PeakLevelDb, Converter={StaticResource DbToYPosition}}"
+                                    Width="{Binding ElementName=ColorBarsStackPanel, Path=ActualWidth}" 
+                                    Height="2" Background="#FF1744" Opacity="0.7"/>
+                        </Canvas>
+
+                        <!-- Stacked Color Indicators (at bottom, grows upward) -->
+                        <StackPanel x:Name="ColorBarsStackPanel" VerticalAlignment="Bottom" Margin="40,0,0,0" Orientation="Vertical">
+                            <!-- Red Level (Critical) - appears first, at visual bottom when high dBFS -->
+                            <Border Background="#F44336" 
+                                    Height="{Binding CurrentLevelDb, Converter={StaticResource RedHeight}}"/>
+
+                            <!-- Yellow Level (Caution) - appears second, in middle -->
+                            <Border Background="#FFC107" 
+                                    Height="{Binding CurrentLevelDb, Converter={StaticResource YellowHeight}}"/>
+
+                            <!-- Green Level (Safe) - appears last, at visual top for low dBFS -->
+                            <Border Background="#4CAF50" 
+                                    Height="{Binding CurrentLevelDb, Converter={StaticResource GreenHeight}}"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <TextBlock Style="{StaticResource ValueLabelStyle}" 
+                           Text="{Binding CurrentLevelDb, StringFormat={}{0:F1} dB}"/>
+            </StackPanel>
+
+            <!-- Metrics Panel -->
+            <StackPanel Grid.Column="1" Margin="40,20,0,20">
+                <TextBlock Style="{StaticResource MetricLabelStyle}" Text="Audio Metrics" Margin="0,0,0,15"/>
+
+                <StackPanel Margin="0,0,0,15">
+                    <TextBlock Text="PEAK" Foreground="#999" FontSize="11" Margin="0,0,0,3"/>
+                    <TextBlock Style="{StaticResource ValueLabelStyle}" 
+                               Text="{Binding PeakLevelDb, StringFormat={}{0:F1} dB}" Margin="0,0,0,5"/>
+                </StackPanel>
+
+                <StackPanel Margin="0,0,0,15">
+                    <TextBlock Text="RMS" Foreground="#999" FontSize="11" Margin="0,0,0,3"/>
+                    <TextBlock Style="{StaticResource ValueLabelStyle}" 
+                               Text="{Binding AverageRmsDb, StringFormat={}{0:F1} dB}" Margin="0,0,0,5"/>
+                </StackPanel>
+
+                <StackPanel Margin="0,0,0,15">
+                    <TextBlock Text="LUFS (5s Avg)" Foreground="#999" FontSize="11" Margin="0,0,0,3"/>
+                    <TextBlock Style="{StaticResource ValueLabelStyle}" 
+                               Text="{Binding AverageLufsDb, StringFormat={}{0:F1} dB}" Margin="0,0,0,5"/>
+                </StackPanel>
+
+                <StackPanel Margin="0,0,0,15">
+                    <TextBlock Text="LUFS (Integrated)" Foreground="#999" FontSize="11" Margin="0,0,0,3"/>
+                    <TextBlock Style="{StaticResource ValueLabelStyle}" 
+                               Text="{Binding IntegratedLufsDb, StringFormat={}{0:F1} dB}" Margin="0,0,0,5"/>
+                </StackPanel>
+
+                <StackPanel Margin="0,0,0,15">
+                    <TextBlock Text="Headroom" Foreground="#999" FontSize="11" Margin="0,0,0,3"/>
+                    <TextBlock Style="{StaticResource ValueLabelStyle}" 
+                               Text="{Binding Headroom, StringFormat={}{0:F1} dB}" Margin="0,0,0,5"/>
+                </StackPanel>
+
+                <StackPanel Margin="0,0,0,20">
+                    <TextBlock Text="Clipping Events" Foreground="#999" FontSize="11" Margin="0,0,0,3"/>
+                    <TextBlock Style="{StaticResource ValueLabelStyle}" 
+                               Text="{Binding ClippingCount, StringFormat={}{0}}" Margin="0,0,0,5"/>
+                </StackPanel>
+
+                <Button Command="{Binding ResetPeakCommand}"
+                        Content="Reset Peak" Style="{StaticResource ButtonStyle}"
+                        Height="40" Width="120" Margin="0,0,0,0" HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- Info Footer -->
+        <TextBlock Grid.Row="3" Text="DBFS Level Meter • Select an audio device to start monitoring"
+                   Foreground="#666" FontSize="11" Margin="0,20,0,0"/>
+    </Grid>
+</Window>
