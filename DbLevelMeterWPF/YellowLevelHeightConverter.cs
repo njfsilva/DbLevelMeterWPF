@@ -13,12 +13,12 @@ namespace DbLevelMeterWPF
         {
             if (value is float dbValue)
             {
-                if (float.IsNegativeInfinity(dbValue))
+                if (float.IsNegativeInfinity(dbValue) || dbValue < YellowMin)
                     return 0.0;
 
-                // If level is outside yellow range, show nothing
-                if (dbValue < YellowMin || dbValue >= YellowMax)
-                    return 0.0;
+                // If level is at or above yellow range max, show full yellow bar
+                if (dbValue >= YellowMax)
+                    return MaxHeight / 3;
 
                 // Map dB range to height (partial fill)
                 float normalizedValue = (dbValue - YellowMin) / (YellowMax - YellowMin);

@@ -38,13 +38,13 @@ public class RedLevelHeightConverterTests
     }
 
     [Fact]
-    public void Convert_AtRedMax_ReturnsMaxRedHeight()
+    public void Convert_AtRedMax_ReturnsFullHeight()
     {
         // Act
         object result = _converter.Convert(0.0f, typeof(double), null, CultureInfo.InvariantCulture);
 
         // Assert
-        // MaxHeight / 3 = 80
+        // At RedMax (0), clipping detected, should show full height
         Assert.InRange((float)result, 79.9f, 80.1f);
     }
 
@@ -60,13 +60,14 @@ public class RedLevelHeightConverterTests
     }
 
     [Fact]
-    public void Convert_AboveRedMax_ReturnsMaxRedHeight()
+    public void Convert_JustBelowRedMax_ReturnsMaxRedHeight()
     {
         // Act
-        object result = _converter.Convert(5.0f, typeof(double), null, CultureInfo.InvariantCulture);
+        object result = _converter.Convert(-0.5f, typeof(double), null, CultureInfo.InvariantCulture);
 
         // Assert
-        Assert.InRange((float)result, 79.9f, 80.1f);
+        // -0.5 is 5% of red range (-10 to 0), so should be ~76 (0.95 * 80)
+        Assert.InRange((float)result, 75.0f, 77.0f);
     }
 
     [Fact]

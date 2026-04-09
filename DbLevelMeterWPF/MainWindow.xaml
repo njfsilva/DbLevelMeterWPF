@@ -114,15 +114,15 @@
 
                         <!-- Stacked Color Indicators (at bottom, grows upward) -->
                         <StackPanel x:Name="ColorBarsStackPanel" VerticalAlignment="Bottom" Margin="40,0,0,0" Orientation="Vertical">
-                            <!-- Red Level (Critical) - appears first, at visual bottom when high dBFS -->
+                            <!-- Red Level (Critical) - -10 to 0 dB (TOP) -->
                             <Border Background="#F44336" 
                                     Height="{Binding CurrentLevelDb, Converter={StaticResource RedHeight}}"/>
 
-                            <!-- Yellow Level (Caution) - appears second, in middle -->
+                            <!-- Yellow Level (Caution) - -18 to -10 dB (MIDDLE) -->
                             <Border Background="#FFC107" 
                                     Height="{Binding CurrentLevelDb, Converter={StaticResource YellowHeight}}"/>
 
-                            <!-- Green Level (Safe) - appears last, at visual top for low dBFS -->
+                            <!-- Green Level (Safe) - -72 to -18 dB (BOTTOM) -->
                             <Border Background="#4CAF50" 
                                     Height="{Binding CurrentLevelDb, Converter={StaticResource GreenHeight}}"/>
                         </StackPanel>

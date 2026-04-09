@@ -37,13 +37,14 @@ public class YellowLevelHeightConverterTests
     }
 
     [Fact]
-    public void Convert_AtYellowMax_ReturnsZero()
+    public void Convert_AtYellowMax_ReturnsFullHeight()
     {
         // Act
         object result = _converter.Convert(-10.0f, typeof(double), null, CultureInfo.InvariantCulture);
 
         // Assert
-        Assert.Equal(0.0, result);
+        // At YellowMax (-10), level is at the boundary, should show full height
+        Assert.InRange((float)result, 79.9f, 80.1f);
     }
 
     [Fact]
@@ -69,13 +70,14 @@ public class YellowLevelHeightConverterTests
     }
 
     [Fact]
-    public void Convert_AboveYellowRange_ReturnsZero()
+    public void Convert_AboveYellowRange_ReturnsFullHeight()
     {
         // Act
-        object result = _converter.Convert(5.0f, typeof(double), null, CultureInfo.InvariantCulture);
+        object result = _converter.Convert(-5.0f, typeof(double), null, CultureInfo.InvariantCulture);
 
         // Assert
-        Assert.Equal(0.0, result);
+        // Above yellow range should be in red range, but yellow still shows full to be stacked
+        Assert.InRange((float)result, 79.9f, 80.1f);
     }
 
     [Fact]

@@ -37,13 +37,13 @@ public class GreenLevelHeightConverterTests
     }
 
     [Fact]
-    public void Convert_AtGreenMax_ReturnsMaxGreenHeight()
+    public void Convert_AtGreenMax_ReturnsFullHeight()
     {
         // Act
         object result = _converter.Convert(-18.0f, typeof(double), null, CultureInfo.InvariantCulture);
 
         // Assert
-        // MaxHeight / 3 = 80
+        // At GreenMax (-18), level is at the boundary, should show full height
         Assert.InRange((float)result, 79.9f, 80.1f);
     }
 
@@ -59,13 +59,14 @@ public class GreenLevelHeightConverterTests
     }
 
     [Fact]
-    public void Convert_AboveGreenMax_ReturnsMaxGreenHeight()
+    public void Convert_JustBelowGreenMax_ReturnsMaxGreenHeight()
     {
         // Act
-        object result = _converter.Convert(0.0f, typeof(double), null, CultureInfo.InvariantCulture);
+        object result = _converter.Convert(-18.1f, typeof(double), null, CultureInfo.InvariantCulture);
 
         // Assert
-        Assert.InRange((float)result, 79.9f, 80.1f);
+        // Just below max should show nearly full bar
+        Assert.InRange((float)result, 79.5f, 80.1f);
     }
 
     [Fact]

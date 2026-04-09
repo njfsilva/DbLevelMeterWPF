@@ -16,7 +16,7 @@ namespace DbLevelMeterWPF
                 if (float.IsNegativeInfinity(dbValue) || dbValue < GreenMin)
                     return 0.0;
 
-                // If level is above green range, show full green bar
+                // If level is at or above green range max, show full green bar
                 if (dbValue >= GreenMax)
                     return MaxHeight / 3;
 
