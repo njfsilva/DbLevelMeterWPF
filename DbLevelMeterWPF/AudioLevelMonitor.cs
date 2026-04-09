@@ -1,4 +1,5 @@
 using NAudio.Wave;
+using System.Buffers;
 using System.Collections.ObjectModel;
 
 namespace DbLevelMeterWPF
@@ -21,6 +22,8 @@ namespace DbLevelMeterWPF
         private const double ResetIntervalSeconds = 5.0;
         private bool _lastFrameWasClipping;
         private CircularBuffer? _sessionAudioBuffer;
+        private float[]? _sessionSampleBuffer;
+        private int _lastSessionSampleBufferSize;
 
         public event EventHandler<LevelChangedEventArgs>? LevelChanged;
 
@@ -100,7 +103,7 @@ namespace DbLevelMeterWPF
             }
         }
 
-        public void StartMonitoring(int deviceIndex)
+        public void StartMonitoring(int deviceIndex, int bufferMilliseconds = 17)
         {
             if (IsMonitoring)
                 StopMonitoring();
@@ -108,7 +111,7 @@ namespace DbLevelMeterWPF
             _waveIn = new WaveInEvent 
             { 
                 DeviceNumber = deviceIndex,
-                BufferMilliseconds = 17  // ~60fps refresh rate
+                BufferMilliseconds = bufferMilliseconds
             };
             _waveIn.WaveFormat = new WaveFormat(44100, 16, 1);
 
@@ -169,13 +172,19 @@ namespace DbLevelMeterWPF
                 int sampleCount = e.BytesRecorded / bytesPerSample;
                 if (_waveIn.WaveFormat.BitsPerSample == 16 && _sessionAudioBuffer != null)
                 {
-                    float[] samples = new float[sampleCount];
+                    // Reuse buffer if size matches, otherwise allocate new one
+                    if (_sessionSampleBuffer == null || _sessionSampleBuffer.Length != sampleCount)
+                    {
+                        _sessionSampleBuffer = new float[sampleCount];
+                        _lastSessionSampleBufferSize = sampleCount;
+                    }
+
                     for (int i = 0; i < sampleCount; i++)
                     {
                         short sample = BitConverter.ToInt16(e.Buffer, i * bytesPerSample);
-                        samples[i] = sample / 32768f;
+                        _sessionSampleBuffer[i] = sample / 32768f;
                     }
-                    _sessionAudioBuffer.AddSamples(samples);
+                    _sessionAudioBuffer.AddSamples(_sessionSampleBuffer);
                 }
 
                 // Calculate Integrated LUFS from session buffer
@@ -251,31 +260,59 @@ namespace DbLevelMeterWPF
 
         private float[] ApplyKWeighting(float[] samples)
         {
-            float[] weighted = new float[samples.Length];
-            float highFreqBoost = 1.4f;
-            float highShelf = 1.2f;
-
-            for (int i = 0; i < samples.Length; i++)
+            float[] weighted = ArrayPool<float>.Shared.Rent(samples.Length);
+            try
             {
-                float sample = samples[i];
-                if (i > 0)
-                {
-                    float prev = samples[i - 1];
-                    float gain = 1.0f + (highFreqBoost - 1.0f) * MathF.Abs(sample - prev);
-                    weighted[i] = sample * gain * highShelf;
-                }
-                else
-                {
-                    weighted[i] = sample * highFreqBoost * highShelf;
-                }
-            }
+                float highFreqBoost = 1.4f;
+                float highShelf = 1.2f;
 
-            return weighted;
+                for (int i = 0; i < samples.Length; i++)
+                {
+                    float sample = samples[i];
+                    if (i > 0)
+                    {
+                        float prev = samples[i - 1];
+                        float gain = 1.0f + (highFreqBoost - 1.0f) * MathF.Abs(sample - prev);
+                        weighted[i] = sample * gain * highShelf;
+                    }
+                    else
+                    {
+                        weighted[i] = sample * highFreqBoost * highShelf;
+                    }
+                }
+
+                // Return only the filled portion
+                float[] result = new float[samples.Length];
+                Array.Copy(weighted, 0, result, 0, samples.Length);
+                return result;
+            }
+            finally
+            {
+                ArrayPool<float>.Shared.Return(weighted);
+            }
         }
 
         private void OnLevelChanged()
         {
             LevelChanged?.Invoke(this, new LevelChangedEventArgs { Level = CurrentLevel });
+        }
+
+        /// <summary>
+        /// Calculates the buffer milliseconds needed for a given monitor refresh rate.
+        /// </summary>
+        /// <param name="refreshRate">Monitor refresh rate in Hz (e.g., 60, 120, 144)</param>
+        /// <returns>Buffer time in milliseconds</returns>
+        public static int CalculateBufferMillisecondsFromRefreshRate(int refreshRate)
+        {
+            if (refreshRate <= 0)
+                return 17; // Default to ~60fps if invalid
+
+            // Buffer time = 1000 ms / refresh rate Hz
+            // For 60Hz: 1000/60 ≈ 16.67ms
+            // For 120Hz: 1000/120 ≈ 8.33ms
+            // For 144Hz: 1000/144 ≈ 6.94ms
+            int bufferMs = Math.Max(1, 1000 / refreshRate);
+            return bufferMs;
         }
 
         public void Dispose()
@@ -327,84 +364,92 @@ namespace DbLevelMeterWPF
 
             if (_waveFormat.BitsPerSample == 16)
             {
-                float[] samples = new float[sampleCount];
-                for (int i = 0; i < sampleCount; i++)
+                // Reuse samples buffer from pool
+                float[] samples = ArrayPool<float>.Shared.Rent(sampleCount);
+                try
                 {
-                    short sample = BitConverter.ToInt16(buffer, i * 2);
-                    float normalized = sample / 32768f;
-                    samples[i] = normalized;
-
-                    float absValue = Math.Abs(normalized);
-                    if (absValue > maxValue)
-                        maxValue = absValue;
-
-                    sumSquares += normalized * normalized;
-                }
-
-                // Add samples to circular buffer for RMS and LUFS calculation
-                _audioBuffer.AddSamples(samples);
-
-                // Calculate current peak
-                if (maxValue > 0)
-                {
-                    _currentLevel = 20 * MathF.Log10(maxValue);
-                }
-                else
-                {
-                    _currentLevel = float.NegativeInfinity;
-                }
-
-                // Apply smoothing with fallback envelope
-                if (float.IsNegativeInfinity(_smoothedLevel))
-                {
-                    _smoothedLevel = _currentLevel;
-                }
-                else if (!float.IsNegativeInfinity(_currentLevel))
-                {
-                    // If new level is higher, jump to it (attack is fast)
-                    if (_currentLevel > _smoothedLevel)
+                    for (int i = 0; i < sampleCount; i++)
                     {
-                        _smoothedLevel = _currentLevel;
-                    }
-                    else
-                    {
-                        // Otherwise, apply gradual fallback
-                        _smoothedLevel = Math.Max(_currentLevel, _smoothedLevel - _fallRatePerUpdate);
-                    }
-                }
-                else
-                {
-                    // If no signal, apply fallback
-                    _smoothedLevel = Math.Max(float.NegativeInfinity, _smoothedLevel - _fallRatePerUpdate);
-                }
+                        short sample = BitConverter.ToInt16(buffer, i * 2);
+                        float normalized = sample / 32768f;
+                        samples[i] = normalized;
 
-                // Calculate average RMS and LUFS over last 5 seconds
-                float[] bufferSamples = _audioBuffer.GetAllSamples();
-                if (bufferSamples.Length > 0)
-                {
-                    // RMS calculation
-                    float meanSquare = 0;
-                    for (int i = 0; i < bufferSamples.Length; i++)
-                    {
-                        meanSquare += bufferSamples[i] * bufferSamples[i];
-                    }
-                    meanSquare /= bufferSamples.Length;
-                    float rms = MathF.Sqrt(meanSquare);
+                        float absValue = Math.Abs(normalized);
+                        if (absValue > maxValue)
+                            maxValue = absValue;
 
-                    if (rms > 0)
-                    {
-                        _averageRmsDb = 20 * MathF.Log10(rms);
-                    }
-                    else
-                    {
-                        _averageRmsDb = float.NegativeInfinity;
+                        sumSquares += normalized * normalized;
                     }
 
-                    // LUFS calculation (simplified K-weighted loudness)
-                    _averageLufsDb = CalculateLufs(bufferSamples);
+                    // Add samples to circular buffer for RMS and LUFS calculation
+                    _audioBuffer.AddSamples(samples);
+
+                            // Calculate current peak
+                            if (maxValue > 0)
+                            {
+                                _currentLevel = 20 * MathF.Log10(maxValue);
+                            }
+                            else
+                            {
+                                _currentLevel = float.NegativeInfinity;
+                            }
+
+                            // Apply smoothing with fallback envelope
+                            if (float.IsNegativeInfinity(_smoothedLevel))
+                            {
+                                _smoothedLevel = _currentLevel;
+                            }
+                            else if (!float.IsNegativeInfinity(_currentLevel))
+                            {
+                                // If new level is higher, jump to it (attack is fast)
+                                if (_currentLevel > _smoothedLevel)
+                                {
+                                    _smoothedLevel = _currentLevel;
+                                }
+                                else
+                                {
+                                    // Otherwise, apply gradual fallback
+                                    _smoothedLevel = Math.Max(_currentLevel, _smoothedLevel - _fallRatePerUpdate);
+                                }
+                            }
+                            else
+                            {
+                                // If no signal, apply fallback
+                                _smoothedLevel = Math.Max(float.NegativeInfinity, _smoothedLevel - _fallRatePerUpdate);
+                            }
+
+                            // Calculate average RMS and LUFS over last 5 seconds
+                            float[] bufferSamples = _audioBuffer.GetAllSamples();
+                            if (bufferSamples.Length > 0)
+                            {
+                                // RMS calculation
+                                float meanSquare = 0;
+                                for (int i = 0; i < bufferSamples.Length; i++)
+                                {
+                                    meanSquare += bufferSamples[i] * bufferSamples[i];
+                                }
+                                meanSquare /= bufferSamples.Length;
+                                float rms = MathF.Sqrt(meanSquare);
+
+                                if (rms > 0)
+                                {
+                                    _averageRmsDb = 20 * MathF.Log10(rms);
+                                }
+                                else
+                                {
+                                    _averageRmsDb = float.NegativeInfinity;
+                                }
+
+                                // LUFS calculation (simplified K-weighted loudness)
+                                _averageLufsDb = CalculateLufs(bufferSamples);
+                            }
+                        }
+                        finally
+                        {
+                            ArrayPool<float>.Shared.Return(samples);
+                        }
+                    }
                 }
-            }
-        }
 
         private float CalculateLufs(float[] samples)
         {
@@ -448,33 +493,41 @@ namespace DbLevelMeterWPF
             // This uses a simplified shelving filter approach
             // High shelf boost around 2kHz and high-frequency boost
 
-            float[] weighted = new float[samples.Length];
-
-            // K-weighting coefficients (simplified but effective)
-            // These approximate the high-frequency shelving behavior
-            float highFreqBoost = 1.4f;  // Boost for presence peak around 2kHz
-            float highShelf = 1.2f;       // Additional high-frequency emphasis
-
-            for (int i = 0; i < samples.Length; i++)
+            float[] weighted = ArrayPool<float>.Shared.Rent(samples.Length);
+            try
             {
-                float sample = samples[i];
+                // K-weighting coefficients (simplified but effective)
+                // These approximate the high-frequency shelving behavior
+                float highFreqBoost = 1.4f;  // Boost for presence peak around 2kHz
+                float highShelf = 1.2f;       // Additional high-frequency emphasis
 
-                // Apply K-weighting as frequency-dependent gain
-                // This is a simplified approximation using sample history
-                if (i > 0)
+                for (int i = 0; i < samples.Length; i++)
                 {
-                    // Simple IIR approximation of K-weighting
-                    float prev = samples[i - 1];
-                    float gain = 1.0f + (highFreqBoost - 1.0f) * MathF.Abs(sample - prev);
-                    weighted[i] = sample * gain * highShelf;
+                    float sample = samples[i];
+
+                    // Apply K-weighting as frequency-dependent gain
+                    // This is a simplified approximation using sample history
+                    if (i > 0)
+                    {
+                        // Simple IIR approximation of K-weighting
+                        float prev = samples[i - 1];
+                        float gain = 1.0f + (highFreqBoost - 1.0f) * MathF.Abs(sample - prev);
+                        weighted[i] = sample * gain * highShelf;
+                    }
+                    else
+                    {
+                        weighted[i] = sample * highFreqBoost * highShelf;
+                    }
                 }
-                else
-                {
-                    weighted[i] = sample * highFreqBoost * highShelf;
-                }
+
+                float[] result = new float[samples.Length];
+                Array.Copy(weighted, 0, result, 0, samples.Length);
+                return result;
             }
-
-            return weighted;
+            finally
+            {
+                ArrayPool<float>.Shared.Return(weighted);
+            }
         }
     }
 
@@ -484,6 +537,7 @@ namespace DbLevelMeterWPF
         private int _writeIndex;
         private int _count;
         private readonly object _lockObject = new();
+        private float[]? _cachedResult;
 
         public CircularBuffer(int size)
         {
@@ -503,6 +557,8 @@ namespace DbLevelMeterWPF
                     if (_count < _buffer.Length)
                         _count++;
                 }
+                // Invalidate cache when new samples are added
+                _cachedResult = null;
             }
         }
 
@@ -510,9 +566,18 @@ namespace DbLevelMeterWPF
         {
             lock (_lockObject)
             {
+                // Return cached result if available
+                if (_cachedResult != null && _cachedResult.Length == _count)
+                {
+                    return _cachedResult;
+                }
+
                 float[] result = new float[_count];
                 if (_count == 0)
+                {
+                    _cachedResult = result;
                     return result;
+                }
 
                 if (_count < _buffer.Length)
                 {
@@ -527,6 +592,7 @@ namespace DbLevelMeterWPF
                     Array.Copy(_buffer, 0, result, remainingSpace, _writeIndex);
                 }
 
+                _cachedResult = result;
                 return result;
             }
         }
